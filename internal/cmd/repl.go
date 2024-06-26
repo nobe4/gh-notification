@@ -4,6 +4,7 @@ import (
 	"log/slog"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/nobe4/gh-not/internal/notifications"
 	"github.com/nobe4/gh-not/internal/views/normal"
 	"github.com/spf13/cobra"
 )
@@ -27,14 +28,11 @@ func runRepl(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	notifications := manager.Notifications.Visible()
-
-	renderCache, err := notifications.Table()
-	if err != nil {
-		return err
+	getNotifications := func() notifications.Notifications {
+		return manager.Notifications.Visible()
 	}
 
-	model := normal.New(manager.Actors, notifications, renderCache, config.Data.Keymap, config.Data.View)
+	model := normal.New(manager.Actors, getNotifications, config.Data.Keymap, config.Data.View)
 
 	p := tea.NewProgram(model)
 	if _, err := p.Run(); err != nil {

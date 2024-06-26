@@ -51,18 +51,22 @@ type OpenMessage struct {
 	notification *notifications.Notification
 }
 
+type NoopMsg struct{}
+
 type Model struct {
 	Mode views.Mode
 	Keys Keymap
 	help help.Model
 
+	notificationsRefresh func() notifications.Notifications
+	choices              notifications.Notifications
+	renderCache          []string
+
 	cursor         int
-	choices        notifications.Notifications
 	visibleChoices []int
 	paginator      paginator.Model
 
-	renderCache []string
-	selected    map[int]bool
+	selected map[int]bool
 
 	filter  tea.Model
 	command tea.Model
@@ -74,7 +78,7 @@ type Model struct {
 	result string
 }
 
-func New(actors actors.ActorsMap, notifications notifications.Notifications, renderCache string, keymap config.Keymap, view config.View) Model {
+func New(actors actors.ActorsMap, notificationRefresh func() notifications.Notifications, keymap config.Keymap, view config.View) Model {
 	model := Model{
 		Mode: views.NormalMode,
 		Keys: Keymap{
@@ -91,14 +95,13 @@ func New(actors actors.ActorsMap, notifications notifications.Notifications, ren
 			help:     keymap.Binding("normal", "toggle help"),
 			quit:     keymap.Binding("normal", "quit"),
 		},
-		help:        help.New(),
-		cursor:      0,
-		choices:     notifications,
-		selected:    map[int]bool{},
-		renderCache: strings.Split(renderCache, "\n"),
-		height:      view.Height,
-		actors:      actors,
-		paginator:   paginator.New(),
+		help:                 help.New(),
+		cursor:               0,
+		selected:             map[int]bool{},
+		notificationsRefresh: notificationRefresh,
+		height:               view.Height,
+		actors:               actors,
+		paginator:            paginator.New(),
 	}
 
 	model.command = command.New(actors, model.SelectedNotificationsFunc, keymap)
@@ -112,7 +115,7 @@ func New(actors actors.ActorsMap, notifications notifications.Notifications, ren
 }
 
 func (m Model) Init() tea.Cmd {
-	return m.filter.Init()
+	return tea.Batch(m.refreshNotifications(), m.filter.Init())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -121,6 +124,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 
+	case NoopMsg:
+
 	case filter.FilterMsg:
 		m.visibleChoices = msg.IntSlice()
 		m.paginator.Page = 0
@@ -128,7 +133,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case views.ResultMsg:
 		m.result = msg.String()
-		return m, views.ChangeMode(views.ResultMode)
+		return m, tea.Batch(m.refreshNotifications(), views.ChangeMode(views.ResultMode))
 
 	case SelectMsg:
 		m.selected[msg.id] = msg.selected
@@ -300,4 +305,20 @@ func (m Model) openCurrent() tea.Cmd {
 		visibleLineId := m.visibleChoices[m.cursor]
 		return OpenMessage{notification: m.choices[visibleLineId]}
 	}
+}
+
+func (m *Model) refreshNotifications() {
+	m.cursor = 0
+	m.paginator.Page = 0
+	m.selected = map[int]bool{}
+
+	m.choices = m.notificationsRefresh()
+
+	renderCache, err := m.choices.Table()
+	if err != nil {
+		// TODO: handle error
+		panic(err)
+	}
+
+	m.renderCache = strings.Split(renderCache, "\n")
 }
